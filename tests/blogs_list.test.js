@@ -4,15 +4,37 @@ const app = require ('../app')
 
 const api = supertest(app)
 const Blog = require('../models/blog')
-const { blogsList, newBlog } = require('./blogs_test_helpers')
+const User = require('../models/user')
+const { userList, blogsList, newBlog } = require('./blogs_test_helpers')
+
+
+const testUser = {
+  username: "User",
+  password: "abcd123"
+};
+let token;
+
+beforeAll(async () => {
+  await User.deleteMany({})
+  for (let user of userList) {
+    let newUser = new User(user)
+    await newUser.save()
+  }
+  await api.post('/api/users').send(testUser)
+
+  const response = await api.post('/api/login').send(testUser)
+  token = response.body.token
+})
 
 beforeEach(async () => {
   await Blog.deleteMany({})
   for (let blog of blogsList) {
     let blogPost = new Blog(blog)
+    
     await blogPost.save()
   }
 })
+
 
 describe('GET', () => {
   test('returns the correct number of blogs', async() => {
@@ -28,9 +50,31 @@ describe('GET', () => {
   })
 })
 
+
+describe('DELETE', () => {
+  test('removes a blog post using unique id', async() => {
+    const response = await api
+      .post('/api/blogs')
+      .send(newBlog)
+      .set('Authorization', 'bearer ' + token)
+    
+    await api
+      .delete(`/api/blogs/${response.body.id}`)
+      .set('Authorization', 'bearer ' + token)
+      .expect(204)
+
+    const blogsAfter = await api.get('/api/blogs')
+    expect(blogsAfter.body).toHaveLength(blogsList.length)
+  })
+})
+
+
 describe('POST', () => {
   test('adds a new blog to the database', async() => {
-    const response = await api.post('/api/blogs').send(newBlog)
+    const response = await api
+      .post('/api/blogs')
+      .send(newBlog)
+      .set('Authorization', 'bearer ' + token)
     expect(response.body).toMatchObject(newBlog)
 
     const blogsAfter = await api.get('/api/blogs')
@@ -38,8 +82,18 @@ describe('POST', () => {
   })
 
   test('if likes is missing from post then default to 0', async() => {
-    const response = await api.post('/api/blogs').send(newBlog)
+    const response = await api
+      .post('/api/blogs')
+      .send(newBlog)
+      .set('Authorization', 'bearer ' + token)
     expect(response.body).toHaveProperty('likes', 0)
+  })
+
+  test('if unauthorized request return status 401', async() => {
+    await api
+      .post('/api/blogs')
+      .send(newBlog)
+      .expect(401)
   })
 
   test('if title and url are missing return status 400', async() => {
@@ -48,23 +102,11 @@ describe('POST', () => {
 
     await api
       .post('/api/blogs')
-      .send(newBlog)
+      .send(newBlog).set('Authorization', 'bearer ' + token)
       .expect(400)
   })
 })
 
-describe('DELETE', () => {
-  test('removes a blog post using unique id', async() => {
-    const response = await api.get('/api/blogs')
-    
-    await api
-      .delete(`/api/blogs/${response.body[0].id}`)
-      .expect(204)
-
-    const blogsAfter = await api.get('/api/blogs')
-    expect(blogsAfter.body).toHaveLength(blogsList.length - 1)
-  })
-})
 
 describe('PUT', () => {
   test('updates likes correctly', async() => {
@@ -75,7 +117,7 @@ describe('PUT', () => {
     
     await api
       .put(`/api/blogs/${updatedBlog.id}`)
-      .send(updatedBlog)
+      .send(updatedBlog).set('Authorization', 'bearer ' + token)
       .expect(200)
 
     const blogsAfter = await api.get('/api/blogs')

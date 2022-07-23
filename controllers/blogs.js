@@ -1,9 +1,11 @@
 const blogsRouter = require('express').Router()
 const Blog = require('../models/blog')
-
+const User = require('../models/user')
+const { userExtractor } = require('../utils/auth_helper')
 
 blogsRouter.get('/', async (req, res) => {
-  const blogs = await Blog.find({})
+  const blogs = await Blog
+    .find({}).populate('user', { username: 1, name: 1 })
 
   if (blogs) {
     res.json(blogs)
@@ -12,22 +14,30 @@ blogsRouter.get('/', async (req, res) => {
   }
 })
 
-blogsRouter.post('/', async (req, res) => {
+blogsRouter.post('/', userExtractor, async (req, res) => {
   const blog = new Blog(req.body)
-
-  if (!blog.likes) {
-    blog.likes = 0
-  }
   if (!blog.url || !blog.title) {
     res.status(400).end()
   }
-  const result = await blog.save()
-  res.status(201).json(result)
+
+  blog.likes = blog.likes ? blog.likes : 0
+  blog.user = await User.findById(req.userId)
+  
+  const newBlog = await blog.save()
+  res.status(201).json(newBlog)
 })
 
-blogsRouter.delete('/:id', async (req, res) => {
-  const result = await Blog.findByIdAndRemove(req.params.id)
+blogsRouter.delete('/:id', userExtractor, async (req, res) => {
+  const blog = await Blog.findById(req.params.id)
+  console.log(blog)
+  if (!blog.user) {
+    return res.status(400).json({ error: 'this blog has no user'})
+  }
+  if (blog.user.toString() !== req.userId) {
+    return res.status(403).json({ error: 'access forbidden' })
+  }
 
+  const result = await Blog.findByIdAndRemove(req.params.id)
   if (result) {
     res.status(204).end()
   } else {
@@ -35,12 +45,11 @@ blogsRouter.delete('/:id', async (req, res) => {
   }
 })
 
-blogsRouter.put('/:id', async (req, res) => {
+blogsRouter.put('/:id', userExtractor, async (req, res) => {
   const blog = req.body
   const options = { new: true, runValidators: true }
 
   const result = await Blog.findByIdAndUpdate(req.params.id, blog, options)
-
   if (result) {
     res.json(result)
   } else {
